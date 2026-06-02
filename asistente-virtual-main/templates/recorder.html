@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Moka Asistente</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #0d0d0d;
+            color: #e5e5e5;
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        header {
+            background-color: #1a1a1a;
+            padding: 15px;
+            text-align: center;
+            font-size: 20px;
+            font-weight: bold;
+            border-bottom: 2px solid #333;
+        }
+
+        #indicator {
+            width: 25px;
+            height: 25px;
+            border-radius: 50%;
+            margin: 20px auto;
+            background-color: #444;
+            transition: background-color 0.3s, transform 0.3s;
+        }
+
+        .active {
+            background-color: #00ff99 !important;
+            transform: scale(1.4);
+            box-shadow: 0 0 15px #00ff99;
+        }
+
+        #response {
+            margin: 20px;
+            font-size: 18px;
+            background-color: #1a1a1a;
+            padding: 15px;
+            border-radius: 8px;
+            min-height: 120px;
+            overflow-y: auto;
+        }
+
+        #controls {
+            text-align: center;
+            margin-bottom: 25px;
+        }
+
+        button {
+            background-color: #333;
+            color: #e5e5e5;
+            padding: 12px 20px;
+            border: none;
+            margin: 5px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        button:hover {
+            background-color: #444;
+        }
+    </style>
+</head>
+<body>
+
+<header>Asistente Moka</header>
+
+<div id="indicator"></div>
+
+<div id="response">Esperando activación por voz...</div>
+
+<div id="controls">
+    <button onclick="startManualRecord()">Grabar Manual</button>
+    <button onclick="stopAudio()">Detener Audio</button>
+</div>
+
+<!-- SOLO UNA VEZ -->
+<audio id="audioPlayer"></audio>
+
+<!-- Socket.io desde CDN -->
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+
+<!-- Tu recorder.js -->
+<script src="/static/recorder.js"></script>
+
+<script>
+    // Variables únicas
+    const socket = io();
+    const indicator = document.getElementById("indicator");
+    const responseBox = document.getElementById("response");
+    const audioPlayer = document.getElementById("audioPlayer");
+
+    // Eventos desde el servidor
+    socket.on("activar_microfono", () => {
+        indicator.classList.add("active");
+        responseBox.innerText = "Escuchando...";
+        recorder("/audio"); // recorder.js debe usar la variable global audioPlayer
+    });
+
+    socket.on("reproducir_audio", data => {
+        audioPlayer.src = data.file;
+        audioPlayer.play();
+    });
+
+    socket.on("iniciar_escucha_nuevamente", () => {
+        indicator.classList.remove("active");
+        responseBox.innerText = "Esperando activación...";
+        recorder("/audio");
+    });
+
+    function startManualRecord() {
+        recorder("/audio");
+    }
+
+    function stopAudio() {
+        audioPlayer.pause();
+        audioPlayer.currentTime = 0;
+    }
+</script>
+
+</body>
+</html>
