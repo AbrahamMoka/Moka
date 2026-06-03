@@ -1,67 +1,143 @@
 import customtkinter as ctk
 import threading
 import time
+import os
+import wave
+import pyaudio
+import numpy as np
+import openwakeword
+from openwakeword.model import Model
+from dotenv import load_dotenv
+from transcriber import Transcriber
+
+# --- CORRECCIÓN PARA LEER EL .ENV SIEMPRE ---
+directorio_actual = os.path.dirname(os.path.abspath(__file__))
+ruta_env = os.path.join(directorio_actual, ".env")
+load_dotenv(ruta_env)
+# --------------------------------------------
 
 # --- 1. Configuración Visual ---
-ctk.set_appearance_mode("dark")  # Modo oscuro tipo Jarvis
-ctk.set_default_color_theme("blue")  # Tema de colores
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("blue")
 
 class MokaApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
         self.title("Moka - Sistema Central")
-        self.geometry("400x500") # Tamaño de la ventana
-
-        # --- 2. Elementos de la Interfaz (Widgets) ---
+        self.geometry("450x550")
         
-        # Título
         self.label_titulo = ctk.CTkLabel(self, text="MOKA OS", font=("Consolas", 24, "bold"), text_color="#00ffcc")
         self.label_titulo.pack(pady=20)
 
-        # Estado del sistema
         self.label_estado = ctk.CTkLabel(self, text="Estado: Iniciando...", font=("Consolas", 14))
         self.label_estado.pack(pady=5)
 
-        # Caja de texto (Terminal) para mostrar lo que Moka dice
-        self.consola_texto = ctk.CTkTextbox(self, width=350, height=250, font=("Consolas", 12))
+        self.consola_texto = ctk.CTkTextbox(self, width=400, height=300, font=("Consolas", 12))
         self.consola_texto.pack(pady=10)
-        self.escribir_en_consola("Sistema operativo cargado.\nEsperando órdenes, señor.")
+        self.escribir_en_consola("Sistema operativo cargado.\nCargando motor auditivo (Whisper)...")
 
-        # Botón manual (opcional, por si falla el micrófono)
+        # Cargamos Whisper
+        self.transcriber = Transcriber()
+        self.escribir_en_consola("Whisper cargado con éxito. Oídos en línea.")
+
         self.boton_escuchar = ctk.CTkButton(self, text="Forzar Escucha", command=self.accion_manual)
-        self.boton_escuchar.pack(pady=20)
+        self.boton_escuchar.pack(pady=10)
 
-        # --- 3. Iniciar el "Cerebro" en el fondo ---
+        # --- Iniciar el "Cerebro" en el fondo ---
         self.iniciar_hilo_escucha()
 
     def escribir_en_consola(self, texto):
-        """Función para que Moka escriba en la pantalla"""
         self.consola_texto.insert("end", texto + "\n\n")
-        self.consola_texto.see("end") # Auto-scroll hacia abajo
+        self.consola_texto.see("end")
 
     def accion_manual(self):
-        self.escribir_en_consola("Botón presionado. Escuchando...")
+        self.escribir_en_consola("Botón presionado. (Función de forzado pendiente)")
 
     def iniciar_hilo_escucha(self):
-        """Aquí metemos el bucle infinito en un hilo separado"""
-        self.label_estado.configure(text="Estado: Escuchando (Ok Moka)...", text_color="green")
-        
-        # Creamos el hilo y lo iniciamos
-        hilo = threading.Thread(target=self.bucle_porcupine_simulado, daemon=True)
+        self.label_estado.configure(text="Estado: Esperando 'Moka'...", text_color="green")
+        hilo = threading.Thread(target=self.bucle_openwakeword_real, daemon=True)
         hilo.start()
 
-    def bucle_porcupine_simulado(self):
-        """AQUÍ ES DONDE IRA TU CÓDIGO REAL DE PORCUPINE Y OLLAMA"""
-        while True:
-            # Simulación: cada 10 segundos fingimos que escuchó algo
-            time.sleep(10) 
-            self.escribir_en_consola("[Usuario dijo]: Hola Moka")
-            time.sleep(1)
-            self.escribir_en_consola("[Moka]: Hola señor, los sistemas están en línea.")
+    def bucle_openwakeword_real(self):
+        """El nuevo cerebro auditivo 100% local con openWakeWord"""
+        # Ruta a tu futuro modelo
+        directorio_actual = os.path.dirname(os.path.abspath(__file__))
+        WAKE_WORD_PATH = os.path.join(directorio_actual, "wakeword", "moka.onnx")
 
-# --- 4. Ejecutar la Aplicación ---
+        self.escribir_en_consola("Cargando modelo openWakeWord...")
+        
+        oww_model = Model(wakeword_models=[WAKE_WORD_PATH])
+
+        FORMAT = pyaudio.paInt16
+        CHANNELS = 1
+        RATE = 16000
+        CHUNK = 1280 # openWakeWord procesa en bloques de 1280
+
+        pa = pyaudio.PyAudio()
+        stream = pa.open(format=FORMAT, channels=CHANNELS, rate=RATE, input=True, frames_per_buffer=CHUNK)
+
+        self.label_estado.configure(text="Estado: Esperando 'Moka'...", text_color="green")
+
+        while True:
+            audio_data = stream.read(CHUNK, exception_on_overflow=False)
+            audio_np = np.frombuffer(audio_data, dtype=np.int16)
+
+            # Le pasamos el audio a la IA
+            prediction = oww_model.predict(audio_np)
+
+            # Buscamos si detectó la palabra con más de 50% de seguridad
+            for mdl in oww_model.prediction_buffer.keys():
+                if prediction[mdl] > 0.5:
+                    self.label_estado.configure(text="Estado: ¡Escuchando orden!", text_color="#00ffcc")
+                    self.escribir_en_consola("✅ Moka detectada. Te escucho (5 segundos)...")
+                    
+                    stream.stop_stream()
+                    
+                    archivo_audio = self.grabar_orden_pyaudio(pa, duracion=5)
+                    
+                    self.label_estado.configure(text="Estado: Transcribiendo...", text_color="yellow")
+                    resultado = self.transcriber.model.transcribe(archivo_audio, fp16=False)
+                    texto_usuario = resultado["text"].strip()
+                    
+                    if texto_usuario:
+                        self.escribir_en_consola(f"[Señor]: {texto_usuario}")
+                    else:
+                        self.escribir_en_consola("[Moka]: No logré escuchar nada, Señor.")
+                    
+                    # Limpiamos la memoria auditiva para que no se active dos veces seguidas
+                    oww_model.reset()
+                    
+                    self.label_estado.configure(text="Estado: Esperando 'Moka'...", text_color="green")
+                    stream.start_stream()
+
+    def grabar_orden_pyaudio(self, pa, duracion=5):
+        """Función para grabar temporalmente la voz y mandarla a Whisper"""
+        FORMAT = pyaudio.paInt16
+        CHANNELS = 1
+        RATE = 16000
+        CHUNK = 1024
+        
+        stream_grabacion = pa.open(format=FORMAT, channels=CHANNELS, rate=RATE, input=True, frames_per_buffer=CHUNK)
+        frames = []
+        
+        for _ in range(0, int(RATE / CHUNK * duracion)):
+            data = stream_grabacion.read(CHUNK)
+            frames.append(data)
+            
+        stream_grabacion.stop_stream()
+        stream_grabacion.close()
+        
+        nombre_archivo = "orden_temporal.wav"
+        wf = wave.open(nombre_archivo, 'wb')
+        wf.setnchannels(CHANNELS)
+        wf.setsampwidth(pa.get_sample_size(FORMAT))
+        wf.setframerate(RATE)
+        wf.writeframes(b''.join(frames))
+        wf.close()
+        
+        return nombre_archivo
+
 if __name__ == "__main__":
     app = MokaApp()
     app.mainloop()
-    
