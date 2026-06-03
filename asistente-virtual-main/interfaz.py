@@ -9,6 +9,7 @@ import openwakeword
 from openwakeword.model import Model
 from dotenv import load_dotenv
 from transcriber import Transcriber
+from llm import generar_respuesta_local
 
 # --- CORRECCIÓN PARA LEER EL .ENV SIEMPRE ---
 directorio_actual = os.path.dirname(os.path.abspath(__file__))
@@ -65,10 +66,15 @@ class MokaApp(ctk.CTk):
         directorio_actual = os.path.dirname(os.path.abspath(__file__))
         WAKE_WORD_PATH = os.path.join(directorio_actual, "wakeword", "moka.onnx")
 
-        self.escribir_en_consola("Cargando modelo openWakeWord...")
+        self.escribir_en_consola("Cargando modelo openWakeWord (Descargando dependencias base si es necesario)...")
         
-        oww_model = Model(wakeword_models=[WAKE_WORD_PATH])
+        # --- SOLUCIÓN: Descargar el melspectrogram faltante y forzar el uso de ONNX ---
+        openwakeword.utils.download_models()
+        oww_model = Model(wakeword_models=[WAKE_WORD_PATH], inference_framework="onnx")
+        # ------------------------------------------------------------------------------
 
+        FORMAT = pyaudio.paInt16
+        # ... (todo el resto de tu código hacia abajo se queda exactamente igual)
         FORMAT = pyaudio.paInt16
         CHANNELS = 1
         RATE = 16000
@@ -99,11 +105,23 @@ class MokaApp(ctk.CTk):
                     self.label_estado.configure(text="Estado: Transcribiendo...", text_color="yellow")
                     resultado = self.transcriber.model.transcribe(archivo_audio, fp16=False)
                     texto_usuario = resultado["text"].strip()
-                    
+
                     if texto_usuario:
-                        self.escribir_en_consola(f"[Señor]: {texto_usuario}")
+                     # Imprimimos lo que dijiste tú
+                     self.escribir_en_consola(f"[Señor]: {texto_usuario}")
+
+                     # Cambiamos el estado para saber que la IA está pensando
+                     self.label_estado.configure(text="Estado: Procesando respuesta...", text_color="orange")
+
+                     # Mandamos tu texto al cerebro de Qwen 2.5
+                     respuesta_moka = generar_respuesta_local(texto_usuario)
+
+                     # Imprimimos la respuesta de Moka
+                     self.escribir_en_consola(f"[Moka]: {respuesta_moka}")
+
                     else:
-                        self.escribir_en_consola("[Moka]: No logré escuchar nada, Señor.")
+                     self.escribir_en_consola("[Moka]: No logré escuchar nada, Señor.")
+                     
                     
                     # Limpiamos la memoria auditiva para que no se active dos veces seguidas
                     oww_model.reset()
